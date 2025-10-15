@@ -1,6 +1,7 @@
 import { IMAGE_URLS, MAX_PARTICLES, WORKGROUP_SIZE, TEXTURE_SIZE, DYNAMIC_PARTICLE_STRIDE, STATIC_PARTICLE_STRIDE } from './config';
 import { computeWGSL, renderWGSL } from './shaders';
 import { TextureLoader } from './textureLoader';
+import { getClearColorFromCSS } from './themeUtils';
 
 export class WebGPURenderer {
     private canvas: HTMLCanvasElement;
@@ -29,6 +30,23 @@ export class WebGPURenderer {
     private textureLoader!: TextureLoader;
     private frame = 0;
     private lastTime = 0;
+    // RGBA clear color normalized to [0,1]
+    private clearColor: [number, number, number, number] = [0.05, 0.05, 0.05, 1.0];
+
+    // FPS tracking
+    private fpsFrames = 0;
+    private fpsLastTime = 0;
+    private currentFPS = 0;
+    private fpsOverlay?: HTMLDivElement;
+
+    // Public setter/getter so app can override clear color if needed.
+    public setClearColor(r: number, g: number, b: number, a = 1.0) {
+        const clamp = (v: number) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0);
+        this.clearColor = [clamp(r), clamp(g), clamp(b), clamp(a)];
+    }
+    public getClearColor(): [number, number, number, number] {
+        return this.clearColor.slice() as [number, number, number, number];
+    }
 
     constructor(canvas: HTMLCanvasElement, button: HTMLButtonElement) {
         this.canvas = canvas;
@@ -49,8 +67,63 @@ export class WebGPURenderer {
         this.createAssets();
         this.createPipelines();
 
-        this.button.addEventListener('click', () => this.addParticle());
+        // Initialize clear color from CSS variables and listen for theme changes
+        try {
+            const c = getClearColorFromCSS();
+            this.clearColor = c;
+        } catch (e) {
+            // keep default
+        }
+        try {
+            const mql = window.matchMedia('(prefers-color-scheme: dark)');
+            if (typeof mql.addEventListener === 'function') {
+                mql.addEventListener('change', () => {
+                    try { this.clearColor = getClearColorFromCSS(); } catch (e) {}
+                });
+            } else if (typeof (mql as any).addListener === 'function') {
+                // fallback for older browsers
+                (mql as any).addListener(() => { try { this.clearColor = getClearColorFromCSS(); } catch (e) {} });
+            }
+        } catch (e) {
+            // ignore if matchMedia is unavailable
+        }
+
+        this.createFPSOverlay();
         return true;
+    }
+
+    private createFPSOverlay() {
+        this.fpsOverlay = document.createElement('div');
+        this.fpsOverlay.id = 'fps-overlay';
+        this.fpsOverlay.style.cssText = `
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #0f0;
+            padding: 8px 12px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            border-radius: 4px;
+            z-index: 9999;
+            display: none;
+            pointer-events: none;
+        `;
+        this.fpsOverlay.textContent = 'FPS: --';
+        document.body.appendChild(this.fpsOverlay);
+    }
+
+    public toggleFPS(show?: boolean) {
+        if (!this.fpsOverlay) return;
+        if (show === undefined) {
+            this.fpsOverlay.style.display = this.fpsOverlay.style.display === 'none' ? 'block' : 'none';
+        } else {
+            this.fpsOverlay.style.display = show ? 'block' : 'none';
+        }
+    }
+
+    public getFPS(): number {
+        return this.currentFPS;
     }
 
     private configureCanvas(): void {
@@ -88,7 +161,7 @@ export class WebGPURenderer {
             usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         });
 
-        // Uniforms: deltaTime(f32), particleCount(u32), aspectRatio(f32), padding(f32) = 16 bytes
+        // Uniforms: deltaTime(f32), particleCount(u32), aspectRatio(f32), zoomScale(f32) = 16 bytes
         this.uniformsBuffer = this.device.createBuffer({
             size: 16,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -109,6 +182,10 @@ export class WebGPURenderer {
             IMAGE_URLS.length
         );
     }
+
+    // ...parsing helpers moved to src/themeUtils.ts
+
+    // ...clear color logic moved to src/themeUtils.ts
 
     private createPipelines() {
         const computeShaderModule = this.device.createShaderModule({ code: computeWGSL });
@@ -206,7 +283,7 @@ export class WebGPURenderer {
         });
     }
 
-    private async addParticle() {
+    public async addParticle() {
         if (this.particleCount >= MAX_PARTICLES) return;
 
         let cnt = Math.round(Math.random() * 3 + 2.5);
@@ -260,7 +337,7 @@ export class WebGPURenderer {
                 );
 
                 this.particleCount++;
-                this.button.textContent = `添加一张图片 (${this.particleCount})`;
+                this.button.textContent = `更多珠珠 (${this.particleCount})`;
             } catch (error) {
                 console.error('Failed to add particle:', error);
             }
@@ -272,7 +349,18 @@ export class WebGPURenderer {
         const deltaTime = this.lastTime > 0 ? Math.min(0.1, (now - this.lastTime) / 1000.0) : 0.016;
         this.lastTime = now;
 
-        // uniforms：deltaTime, particleCount, aspectRatio, padding
+        // Update FPS
+        this.fpsFrames++;
+        if (now - this.fpsLastTime >= 1000) {
+            this.currentFPS = Math.round((this.fpsFrames * 1000) / (now - this.fpsLastTime));
+            if (this.fpsOverlay && this.fpsOverlay.style.display !== 'none') {
+                this.fpsOverlay.textContent = `FPS: ${this.currentFPS}`;
+            }
+            this.fpsFrames = 0;
+            this.fpsLastTime = now;
+        }
+
+        // 更新 uniforms：deltaTime, particleCount, aspectRatio, padding
         const uniformsData = new Float32Array(4);
         uniformsData[0] = deltaTime;
         const u32View = new Uint32Array(uniformsData.buffer);
@@ -291,10 +379,11 @@ export class WebGPURenderer {
             computePass.end();
         }
 
+        const [r, g, b, a] = this.clearColor;
         const renderPass = commandEncoder.beginRenderPass({
             colorAttachments: [{
                 view: this.context.getCurrentTexture().createView(),
-                clearValue: { r: 0.05, g: 0.05, b: 0.05, a: 1.0 },
+                clearValue: { r, g, b, a },
                 loadOp: 'clear',
                 storeOp: 'store',
             }],
@@ -319,6 +408,7 @@ export class WebGPURenderer {
 
     public start() {
         this.lastTime = performance.now();
+        this.fpsLastTime = performance.now();
         requestAnimationFrame(this.renderLoop);
     }
 }

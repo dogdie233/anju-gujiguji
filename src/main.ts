@@ -1,4 +1,67 @@
+import './style.css';
 import { WebGPURenderer } from './renderer';
+
+// Setup button events with hold-to-spawn functionality
+function setupButtonEvents(button: HTMLButtonElement, renderer: WebGPURenderer) {
+    let holdTimer: number | null = null;
+    let isHolding = false;
+    let spawnInterval: number | null = null;
+    const HOLD_THRESHOLD = 300; // ms to distinguish hold from click
+    const SPAWN_INTERVAL = 77; // ms between spawns when holding
+
+    const startHold = () => {
+        // Start timer to detect if this is a hold (not just a click)
+        holdTimer = window.setTimeout(() => {
+            isHolding = true;
+            // Immediately spawn first batch when hold is detected
+            renderer.addParticle();
+            // Then spawn continuously
+            spawnInterval = window.setInterval(() => {
+                renderer.addParticle();
+            }, SPAWN_INTERVAL);
+        }, HOLD_THRESHOLD);
+    };
+
+    const endHold = () => {
+        // Clear timers
+        if (holdTimer !== null) {
+            clearTimeout(holdTimer);
+            holdTimer = null;
+        }
+        if (spawnInterval !== null) {
+            clearInterval(spawnInterval);
+            spawnInterval = null;
+        }
+        isHolding = false;
+    };
+
+    const handleClick = () => {
+        // Only trigger click if not holding (click event fires after mouseup)
+        if (!isHolding) {
+            renderer.addParticle();
+        }
+    };
+
+    button.addEventListener('mousedown', startHold);
+    button.addEventListener('mouseup', endHold);
+    button.addEventListener('mouseleave', endHold);
+    button.addEventListener('click', handleClick);
+
+    // Touch events
+    button.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        startHold();
+    });
+    button.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        endHold();
+        // Manually trigger spawn for touch if not holding
+        if (!isHolding) {
+            renderer.addParticle();
+        }
+    });
+    button.addEventListener('touchcancel', endHold);
+}
 
 async function bootstrap() {
     const canvas = document.getElementById('gpu-canvas') as HTMLCanvasElement;
@@ -10,6 +73,13 @@ async function bootstrap() {
 
     if (supported) {
         renderer.start();
+        
+        // Setup button events
+        setupButtonEvents(button, renderer);
+        
+        // Expose FPS toggle to console
+        (window as any).toggleFPS = (show?: boolean) => renderer.toggleFPS(show);
+        console.log('💡 Tip: Use toggleFPS() in console to show/hide FPS overlay');
     } else {
         button.style.display = 'none';
         fallbackDiv.style.display = 'block';

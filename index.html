@@ -5,13 +5,82 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>WebGPU Bouncing Images (Modular)</title>
     <style>
-      /* 样式保持不变 */
-      body { margin: 0; background-color: #111; overflow: hidden; }
-      #gpu-canvas { width: 100vw; height: 100vh; display: block; }
-      #ui-container { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
-      button { padding: 15px 30px; font-size: 1.2em; cursor: pointer; border: 2px solid #00aaff; background-color: rgba(0, 170, 255, 0.1); color: #00aaff; border-radius: 8px; transition: all 0.2s ease; z-index: 10; }
-      button:hover { background-color: rgba(0, 170, 255, 0.3); box-shadow: 0 0 15px rgba(0, 170, 255, 0.5); }
-      #fallback { display: none; padding: 2em; background-color: #332200; border: 1px solid #ffaa00; border-radius: 8px; color: #eee; }
+      /* Material Design Color Tokens */
+      :root {
+        color-scheme: light dark;
+      }
+
+      /* Base Styles */
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: var(--md-sys-color-background);
+        transition: background-color 0.3s ease;
+      }
+
+      #gpu-canvas {
+        width: 100vw;
+        height: 100vh;
+        display: block;
+      }
+
+      #ui-container {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        text-align: center;
+      }
+
+      /* Material Design Button */
+      button {
+        padding: 10px 24px;
+        font-size: 14px;
+        font-weight: 500;
+        cursor: pointer;
+        border: none;
+        border-radius: 20px;
+        min-height: 40px;
+        text-transform: none;
+        letter-spacing: 0.1px;
+        
+        background-color: var(--md-sys-color-primary);
+        color: var(--md-sys-color-on-primary);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
+        
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      button:hover {
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 8px 3px rgba(0, 0, 0, 0.15);
+        background-color: var(--md-sys-color-primary-container);
+        color: var(--md-sys-color-on-primary-container);
+      }
+
+      button:active {
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
+      }
+
+      button:focus-visible {
+        outline: 2px solid var(--md-sys-color-primary);
+        outline-offset: 2px;
+      }
+
+      /* Error Fallback */
+      #fallback {
+        display: none;
+        padding: 24px;
+        border-radius: 12px;
+        max-width: 400px;
+        background-color: var(--md-sys-color-error-container);
+        color: var(--md-sys-color-on-error-container);
+        border: 1px solid var(--md-sys-color-error);
+      }
+
+      #fallback h1 {
+        margin-top: 0;
+        font-size: 1.5em;
+      }
     </style>
 </head>
 <body>
