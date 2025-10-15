@@ -1,75 +1,89 @@
 // src/shaders.ts
 
 export const computeWGSL = `
-    struct Particle {
-        pos: vec2<f32>,
-        vel: vec2<f32>,
-        // Pack scale, rotation, angular_vel, tex_index into a vec4
-        props: vec4<f32>,
-        // Pack aspect_ratio, uv_scale.x, uv_scale.y, and padding into a vec4
-        extra: vec4<f32>,
+    // 动态数据：每帧都会变化的数据
+    struct DynamicParticle {
+        pos: vec2<f32>,      // 位置
+        vel: vec2<f32>,      // 速度
+        rotation: f32,       // 当前旋转角度
+        padding: f32,        // 对齐到 16 字节
     };
 
-    struct Particles {
-        particles: array<Particle>,
+    // 静态数据：创建时设置，之后不变的数据
+    struct StaticParticle {
+        scale: f32,          // 缩放
+        aspectRatio: f32,    // 图片宽高比
+        angularVel: f32,     // 角速度
+        texIndex: u32,       // 纹理索引
+        uvScale: vec2<f32>,  // UV 缩放
+        padding: vec2<f32>,  // 对齐到 16 字节
+    };
+
+    struct DynamicParticles {
+        particles: array<DynamicParticle>,
+    };
+
+    struct StaticParticles {
+        particles: array<StaticParticle>,
     };
 
     struct Uniforms {
         deltaTime: f32,
         particleCount: u32,
-        canvasSize: vec2<f32>, // {aspectRatio, 1.0}
+        aspectRatio: f32,    // canvas 宽高比 (width / height)
+        padding: f32,
     };
 
-    @group(0) @binding(0) var<storage, read> particles_in: Particles;
-    @group(0) @binding(1) var<storage, read_write> particles_out: Particles;
-    @group(0) @binding(2) var<uniform> uniforms: Uniforms;
+    @group(0) @binding(0) var<storage, read> dynamic_in: DynamicParticles;
+    @group(0) @binding(1) var<storage, read_write> dynamic_out: DynamicParticles;
+    @group(0) @binding(2) var<storage, read> static_data: StaticParticles;
+    @group(0) @binding(3) var<uniform> uniforms: Uniforms;
 
     @compute @workgroup_size(64)
     fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let index = global_id.x;
         if (index >= uniforms.particleCount) { return; }
 
-        var p_in = particles_in.particles[index];
-        var pos = p_in.pos + p_in.vel * uniforms.deltaTime;
-        var vel = p_in.vel;
+        let d_in = dynamic_in.particles[index];
+        let s = static_data.particles[index];
         
-        // Unpack properties
-        let p_scale = p_in.props.x;
-        var rotation = p_in.props.y + p_in.props.z * uniforms.deltaTime;
-        let p_aspect_ratio = p_in.extra.x;
+        // 更新位置和旋转
+        var pos = d_in.pos + d_in.vel * uniforms.deltaTime;
+        var vel = d_in.vel;
+        var rotation = d_in.rotation + s.angularVel * uniforms.deltaTime;
         
-        // Calculate the particle's half-size in a coordinate system that is aware of the viewport aspect ratio.
-        // The Y dimension is our reference (-1 to 1). We scale the X dimension accordingly.
-        let world_scale_y = p_scale / 2.0;
-        let world_scale_x = world_scale_y * p_aspect_ratio / uniforms.canvasSize.x;
-        let world_half_size = vec2<f32>(world_scale_x, world_scale_y);
-        let world_area = vec2<f32>(uniforms.canvasSize.x, uniforms.canvasSize.y);
+        // 计算粒子在 NDC 空间中的半尺寸
+        // 使用简化的坐标系统：Y 方向范围是 [-1, 1]，X 方向根据 canvas 宽高比调整
+        let half_height = s.scale * 0.5;
+        let half_width = half_height * s.aspectRatio;
+        
+        // 计算边界（考虑 canvas 的宽高比）
+        let bound_x = uniforms.aspectRatio;
+        let bound_y = 1.0;
 
-        if (pos.x - world_half_size.x < -world_area.x) {
-            pos.x = -world_area.x + world_half_size.x;
+        // 边界碰撞检测（X 方向）
+        if (pos.x - half_width < -bound_x) {
+            pos.x = -bound_x + half_width;
             vel.x = abs(vel.x);
-        } else if (pos.x + world_half_size.x > world_area.x) {
-            pos.x = world_area.x - world_half_size.x;
+        } else if (pos.x + half_width > bound_x) {
+            pos.x = bound_x - half_width;
             vel.x = -abs(vel.x);
         }
 
-        if (pos.y - world_half_size.y < -world_area.y) {
-            pos.y = -world_area.y + world_half_size.y;
+        // 边界碰撞检测（Y 方向）
+        if (pos.y - half_height < -bound_y) {
+            pos.y = -bound_y + half_height;
             vel.y = abs(vel.y);
-        } else if (pos.y + world_half_size.y > world_area.y) {
-            pos.y = world_area.y - world_half_size.y;
+        } else if (pos.y + half_height > bound_y) {
+            pos.y = bound_y - half_height;
             vel.y = -abs(vel.y);
         }
 
-        particles_out.particles[index].pos = pos;
-        particles_out.particles[index].vel = vel;
-        particles_out.particles[index].props.y = rotation; // Update rotation
-        
-        // Pass other data through
-        particles_out.particles[index].props.x = p_in.props.x;
-        particles_out.particles[index].props.z = p_in.props.z;
-        particles_out.particles[index].props.w = p_in.props.w;
-        particles_out.particles[index].extra = p_in.extra;
+        // 写入更新后的动态数据
+        dynamic_out.particles[index].pos = pos;
+        dynamic_out.particles[index].vel = vel;
+        dynamic_out.particles[index].rotation = rotation;
+        dynamic_out.particles[index].padding = 0.0;
     }
 `;
 
@@ -84,7 +98,8 @@ export const renderWGSL = `
     struct Uniforms {
         deltaTime: f32,
         particleCount: u32,
-        canvasSize: vec2<f32>,
+        aspectRatio: f32,
+        padding: f32,
     };
 
     @group(0) @binding(0) var mySampler: sampler;
@@ -94,17 +109,16 @@ export const renderWGSL = `
     @vertex
     fn vs_main(
         @builtin(vertex_index) vertex_index: u32,
-        @location(0) pos: vec2<f32>,
-        @location(1) vel: vec2<f32>,
-        @location(2) props: vec4<f32>, // scale, rotation, angular_vel, tex_index
-        @location(3) extra: vec4<f32>  // aspect_ratio, uv_scale.x, uv_scale.y, padding
+        @location(0) pos: vec2<f32>,           // 动态：位置
+        @location(1) vel: vec2<f32>,           // 动态：速度（未使用，但保持结构）
+        @location(2) rotation: f32,            // 动态：旋转角度
+        @location(3) scale: f32,               // 静态：缩放
+        @location(4) aspectRatio: f32,         // 静态：图片宽高比
+        @location(5) angularVel: f32,          // 静态：角速度（未使用）
+        @location(6) texIndex: u32,            // 静态：纹理索引
+        @location(7) uvScale: vec2<f32>        // 静态：UV 缩放
     ) -> VertexOutput {
-        let p_scale = props.x;
-        let p_rotation = props.y;
-        let p_tex_index = u32(round(props.w));
-        let p_aspect_ratio = extra.x;
-        let p_uv_scale = extra.yz;
-
+        // 四边形的顶点位置（局部坐标，以原点为中心）
         let quad_positions = array<vec2<f32>, 6>(
             vec2<f32>(-0.5, -0.5), vec2<f32>( 0.5, -0.5), vec2<f32>(-0.5,  0.5),
             vec2<f32>(-0.5,  0.5), vec2<f32>( 0.5, -0.5), vec2<f32>( 0.5,  0.5)
@@ -116,22 +130,34 @@ export const renderWGSL = `
 
         var out: VertexOutput;
         out.uv = uvs[vertex_index];
-        out.tex_index = p_tex_index;
-        out.uv_scale = p_uv_scale;
+        out.tex_index = texIndex;
+        out.uv_scale = uvScale;
         
-        let angle = p_rotation;
-        let c = cos(angle);
-        let s = sin(angle);
+        // 旋转矩阵
+        let c = cos(rotation);
+        let s = sin(rotation);
         let rot_matrix = mat2x2<f32>(c, -s, s, c);
         
-        var transformed_pos = quad_positions[vertex_index];
-        transformed_pos.x = transformed_pos.x * p_aspect_ratio;
-        transformed_pos = rot_matrix * transformed_pos;
-        transformed_pos = transformed_pos * p_scale;
-        transformed_pos = transformed_pos + pos;
-        transformed_pos.x = transformed_pos.x / uniforms.canvasSize.x;
+        // 变换顶点
+        var local_pos = quad_positions[vertex_index];
+        
+        // 1. 应用图片的宽高比
+        local_pos.x = local_pos.x * aspectRatio;
+        
+        // 2. 旋转
+        local_pos = rot_matrix * local_pos;
+        
+        // 3. 缩放
+        local_pos = local_pos * scale;
+        
+        // 4. 平移到粒子位置
+        local_pos = local_pos + pos;
+        
+        // 5. 转换到 NDC 坐标
+        // X 方向需要除以 canvas 的宽高比，Y 方向已经在 [-1, 1] 范围内
+        local_pos.x = local_pos.x / uniforms.aspectRatio;
 
-        out.position = vec4<f32>(transformed_pos, 0.0, 1.0);
+        out.position = vec4<f32>(local_pos, 0.0, 1.0);
         return out;
     }
 

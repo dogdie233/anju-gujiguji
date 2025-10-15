@@ -1,13 +1,6 @@
-import { IMAGE_URLS, MAX_PARTICLES, WORKGROUP_SIZE, TEXTURE_SIZE } from './config';
+import { IMAGE_URLS, MAX_PARTICLES, WORKGROUP_SIZE, TEXTURE_SIZE, DYNAMIC_PARTICLE_STRIDE, STATIC_PARTICLE_STRIDE } from './config';
 import { computeWGSL, renderWGSL } from './shaders';
 import { TextureLoader } from './textureLoader';
-
-// 由于增加了 aspect_ratio 和 padding，更新数据结构和步长
-// pos(vec2), vel(vec2) -> 16 bytes
-// props(vec4) -> 16 bytes
-// extra(vec4) -> 16 bytes
-// Total: 48 bytes
-const PARTICLE_STRIDE = 48;
 
 export class WebGPURenderer {
     private canvas: HTMLCanvasElement;
@@ -21,7 +14,10 @@ export class WebGPURenderer {
     private computePipeline!: GPUComputePipeline;
     private renderPipeline!: GPURenderPipeline;
 
-    private particleBuffers!: [GPUBuffer, GPUBuffer];
+    // 动态数据缓冲区（双缓冲，用于乒乓交换）
+    private dynamicBuffers!: [GPUBuffer, GPUBuffer];
+    // 静态数据缓冲区（只写入一次）
+    private staticBuffer!: GPUBuffer;
     private uniformsBuffer!: GPUBuffer;
     private textureArray!: GPUTexture;
     private sampler!: GPUSampler;
@@ -57,32 +53,44 @@ export class WebGPURenderer {
         return true;
     }
 
-    private configureCanvas() {
+    private configureCanvas(): void {
         const devicePixelRatio = window.devicePixelRatio || 1;
-        this.canvas.width = this.canvas.clientWidth * devicePixelRatio;
-        this.canvas.height = this.canvas.clientHeight * devicePixelRatio;
+        const clientWidth = this.canvas.clientWidth;
+        const clientHeight = this.canvas.clientHeight;
+        
+        // 设置物理像素尺寸
+        this.canvas.width = Math.floor(clientWidth * devicePixelRatio);
+        this.canvas.height = Math.floor(clientHeight * devicePixelRatio);
+        
         this.context.configure({
             device: this.device,
             format: this.presentationFormat,
             alphaMode: 'premultiplied',
         });
-        console.info(`Canvas configured: ${this.canvas.width}x${this.canvas.height}`);
     }
 
     private createAssets() {
-        // Buffers
-        this.particleBuffers = [
+        // 动态数据缓冲区（双缓冲）
+        this.dynamicBuffers = [
             this.device.createBuffer({
-                size: MAX_PARTICLES * PARTICLE_STRIDE,
+                size: MAX_PARTICLES * DYNAMIC_PARTICLE_STRIDE,
                 usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
             }),
             this.device.createBuffer({
-                size: MAX_PARTICLES * PARTICLE_STRIDE,
+                size: MAX_PARTICLES * DYNAMIC_PARTICLE_STRIDE,
                 usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
             }),
         ];
+
+        // 静态数据缓冲区（只写入一次）
+        this.staticBuffer = this.device.createBuffer({
+            size: MAX_PARTICLES * STATIC_PARTICLE_STRIDE,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+        });
+
+        // Uniforms: deltaTime(f32), particleCount(u32), aspectRatio(f32), padding(f32) = 16 bytes
         this.uniformsBuffer = this.device.createBuffer({
-            size: 16, // deltaTime, particleCount, canvasSize.xy
+            size: 16,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
 
@@ -109,9 +117,10 @@ export class WebGPURenderer {
         // Compute Pipeline
         const computeBindGroupLayout = this.device.createBindGroupLayout({
             entries: [
-                { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-                { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-                { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } }, // dynamic_in
+                { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },          // dynamic_out
+                { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } }, // static_data
+                { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },          // uniforms
             ],
         });
         this.computePipeline = this.device.createComputePipeline({
@@ -132,16 +141,30 @@ export class WebGPURenderer {
             vertex: {
                 module: renderShaderModule,
                 entryPoint: 'vs_main',
-                buffers: [{
-                    arrayStride: PARTICLE_STRIDE,
-                    stepMode: 'instance',
-                    attributes: [
-                        { shaderLocation: 0, offset: 0, format: 'float32x2' },  // pos
-                        { shaderLocation: 1, offset: 8, format: 'float32x2' },  // vel
-                        { shaderLocation: 2, offset: 16, format: 'float32x4' }, // scale, rot, angular_vel, tex_idx
-                        { shaderLocation: 3, offset: 32, format: 'float32x4' },   // extra
-                    ],
-                }],
+                buffers: [
+                    {
+                        // 动态数据
+                        arrayStride: DYNAMIC_PARTICLE_STRIDE,
+                        stepMode: 'instance',
+                        attributes: [
+                            { shaderLocation: 0, offset: 0, format: 'float32x2' },  // pos
+                            { shaderLocation: 1, offset: 8, format: 'float32x2' },  // vel
+                            { shaderLocation: 2, offset: 16, format: 'float32' },   // rotation
+                        ],
+                    },
+                    {
+                        // 静态数据
+                        arrayStride: STATIC_PARTICLE_STRIDE,
+                        stepMode: 'instance',
+                        attributes: [
+                            { shaderLocation: 3, offset: 0, format: 'float32' },    // scale
+                            { shaderLocation: 4, offset: 4, format: 'float32' },    // aspectRatio
+                            { shaderLocation: 5, offset: 8, format: 'float32' },    // angularVel
+                            { shaderLocation: 6, offset: 12, format: 'uint32' },    // texIndex
+                            { shaderLocation: 7, offset: 16, format: 'float32x2' }, // uvScale
+                        ],
+                    },
+                ],
             },
             fragment: {
                 module: renderShaderModule,
@@ -151,25 +174,28 @@ export class WebGPURenderer {
             primitive: { topology: 'triangle-list' },
         });
 
-        // Bind Groups
+        // Bind Groups for Compute (双缓冲乒乓交换)
         this.computeBindGroups = [
             this.device.createBindGroup({
                 layout: computeBindGroupLayout,
                 entries: [
-                    { binding: 0, resource: { buffer: this.particleBuffers[0] } },
-                    { binding: 1, resource: { buffer: this.particleBuffers[1] } },
-                    { binding: 2, resource: { buffer: this.uniformsBuffer } },
+                    { binding: 0, resource: { buffer: this.dynamicBuffers[0] } },
+                    { binding: 1, resource: { buffer: this.dynamicBuffers[1] } },
+                    { binding: 2, resource: { buffer: this.staticBuffer } },
+                    { binding: 3, resource: { buffer: this.uniformsBuffer } },
                 ],
             }),
             this.device.createBindGroup({
                 layout: computeBindGroupLayout,
                 entries: [
-                    { binding: 0, resource: { buffer: this.particleBuffers[1] } },
-                    { binding: 1, resource: { buffer: this.particleBuffers[0] } },
-                    { binding: 2, resource: { buffer: this.uniformsBuffer } },
+                    { binding: 0, resource: { buffer: this.dynamicBuffers[1] } },
+                    { binding: 1, resource: { buffer: this.dynamicBuffers[0] } },
+                    { binding: 2, resource: { buffer: this.staticBuffer } },
+                    { binding: 3, resource: { buffer: this.uniformsBuffer } },
                 ],
             }),
         ];
+
         this.renderBindGroup = this.device.createBindGroup({
             layout: renderBindGroupLayout,
             entries: [
@@ -189,32 +215,48 @@ export class WebGPURenderer {
             const url = IMAGE_URLS[imageIndex];
 
             try {
-                // 使用 TextureLoader 加载纹理，自动处理缓存和去重
                 const texture = await this.textureLoader.loadTexture(url);
 
-                const particleData = new Float32Array(PARTICLE_STRIDE / 4);
-
+                // 动态数据：pos, vel, rotation, padding
+                const dynamicData = new Float32Array(DYNAMIC_PARTICLE_STRIDE / 4);
                 const velSpeed = (Math.random() + 1) * 0.5;
                 const velAngle = Math.random() * 2 * Math.PI;
-                const velX = Math.cos(velAngle) * velSpeed;
-                const velY = Math.sin(velAngle) * velSpeed;
+                dynamicData[0] = 0.0; // pos.x
+                dynamicData[1] = 0.0; // pos.y
+                dynamicData[2] = Math.cos(velAngle) * velSpeed; // vel.x
+                dynamicData[3] = Math.sin(velAngle) * velSpeed; // vel.y
+                dynamicData[4] = 0.0; // rotation
+                dynamicData[5] = 0.0; // padding
 
-                particleData[0] = 0.0; // pos.x
-                particleData[1] = 0.0; // pos.y
-                particleData[2] = velX; // vel.x
-                particleData[3] = velY; // vel.y
-                particleData[4] = 0.3; // Math.random() * 0.5 + 0.5; // scale
-                particleData[5] = 0.0; // rotation
-                particleData[6] = (Math.random() - 0.5) * 5.0; // angular velocity
-                particleData[7] = texture.textureIndex; // texture index
-                particleData[8] = texture.bitmap.width / texture.bitmap.height; // aspect_ratio
-                particleData[9] = texture.bitmap.width / TEXTURE_SIZE;      // uv_scale.x
-                particleData[10] = texture.bitmap.height / TEXTURE_SIZE;     // uv_scale.y
+                // 静态数据：scale, aspectRatio, angularVel, texIndex, uvScale, padding
+                const staticData = new Float32Array(STATIC_PARTICLE_STRIDE / 4);
+                staticData[0] = 0.3; // scale
+                staticData[1] = texture.bitmap.width / texture.bitmap.height; // aspectRatio
+                staticData[2] = (Math.random() - 0.5) * 5.0; // angularVel
+                const u32View = new Uint32Array(staticData.buffer);
+                u32View[3] = texture.textureIndex; // texIndex (as u32)
+                staticData[4] = texture.bitmap.width / TEXTURE_SIZE;  // uvScale.x
+                staticData[5] = texture.bitmap.height / TEXTURE_SIZE; // uvScale.y
+                staticData[6] = 0.0; // padding
+                staticData[7] = 0.0; // padding
 
+                // 写入动态数据到两个缓冲区（初始状态相同）
                 this.device.queue.writeBuffer(
-                    this.particleBuffers[this.frame % 2],
-                    this.particleCount * PARTICLE_STRIDE,
-                    particleData.buffer
+                    this.dynamicBuffers[0],
+                    this.particleCount * DYNAMIC_PARTICLE_STRIDE,
+                    dynamicData.buffer
+                );
+                this.device.queue.writeBuffer(
+                    this.dynamicBuffers[1],
+                    this.particleCount * DYNAMIC_PARTICLE_STRIDE,
+                    dynamicData.buffer
+                );
+
+                // 写入静态数据（只写一次）
+                this.device.queue.writeBuffer(
+                    this.staticBuffer,
+                    this.particleCount * STATIC_PARTICLE_STRIDE,
+                    staticData.buffer
                 );
 
                 this.particleCount++;
@@ -230,12 +272,13 @@ export class WebGPURenderer {
         const deltaTime = this.lastTime > 0 ? Math.min(0.1, (now - this.lastTime) / 1000.0) : 0.016;
         this.lastTime = now;
 
+        // uniforms：deltaTime, particleCount, aspectRatio, padding
         const uniformsData = new Float32Array(4);
         uniformsData[0] = deltaTime;
         const u32View = new Uint32Array(uniformsData.buffer);
         u32View[1] = this.particleCount;
-        uniformsData[2] = this.canvas.width / this.canvas.height;
-        uniformsData[3] = 1.0;
+        uniformsData[2] = this.canvas.clientWidth / this.canvas.clientHeight; // aspectRatio (CSS 像素)
+        uniformsData[3] = 0.0; // padding
         this.device.queue.writeBuffer(this.uniformsBuffer, 0, uniformsData.buffer);
 
         const commandEncoder = this.device.createCommandEncoder();
@@ -259,7 +302,10 @@ export class WebGPURenderer {
 
         if (this.particleCount > 0) {
             renderPass.setPipeline(this.renderPipeline);
-            renderPass.setVertexBuffer(0, this.particleBuffers[(this.frame + 1) % 2]);
+            // 绑定动态数据（使用计算着色器的输出缓冲区）
+            renderPass.setVertexBuffer(0, this.dynamicBuffers[(this.frame + 1) % 2]);
+            // 绑定静态数据
+            renderPass.setVertexBuffer(1, this.staticBuffer);
             renderPass.setBindGroup(0, this.renderBindGroup);
             renderPass.draw(6, this.particleCount, 0, 0);
         }

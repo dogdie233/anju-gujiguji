@@ -15,3 +15,9 @@ export const MAX_PARTICLES = 10000;
 export const WORKGROUP_SIZE = 64;
 // 将纹理尺寸设大一些，以容纳更大的图片
 export const TEXTURE_SIZE = 1024;
+
+// 动态粒子数据步长：pos(vec2), vel(vec2), rotation(f32), padding(f32) = 24 bytes
+export const DYNAMIC_PARTICLE_STRIDE = 24;
+
+// 静态粒子数据步长：scale(f32), aspectRatio(f32), angularVel(f32), texIndex(u32), uvScale(vec2), padding(vec2) = 32 bytes
+export const STATIC_PARTICLE_STRIDE = 32;
