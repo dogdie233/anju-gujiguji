@@ -98,7 +98,6 @@ export class WebGPURenderer {
         this.textureLoader = new TextureLoader(
             this.device,
             this.textureArray,
-            TEXTURE_SIZE,
             IMAGE_URLS.length
         );
     }

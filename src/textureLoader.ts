@@ -26,7 +26,6 @@ export class TextureLoader {
     constructor(
         device: GPUDevice,
         textureArray: GPUTexture,
-        textureSize: number,
         maxTextures: number
     ) {
         this.device = device;
