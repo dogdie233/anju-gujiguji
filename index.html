@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebGPU Bouncing Images (Modular)</title>
+    <style>
+      /* 样式保持不变 */
+      body { margin: 0; background-color: #111; overflow: hidden; }
+      #gpu-canvas { width: 100vw; height: 100vh; display: block; }
+      #ui-container { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+      button { padding: 15px 30px; font-size: 1.2em; cursor: pointer; border: 2px solid #00aaff; background-color: rgba(0, 170, 255, 0.1); color: #00aaff; border-radius: 8px; transition: all 0.2s ease; z-index: 10; }
+      button:hover { background-color: rgba(0, 170, 255, 0.3); box-shadow: 0 0 15px rgba(0, 170, 255, 0.5); }
+      #fallback { display: none; padding: 2em; background-color: #332200; border: 1px solid #ffaa00; border-radius: 8px; color: #eee; }
+    </style>
+</head>
+<body>
+    <canvas id="gpu-canvas"></canvas>
+    <div id="ui-container">
+        <button id="add-button">添加一张图片</button>
+        <div id="fallback"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
