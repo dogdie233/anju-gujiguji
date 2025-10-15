@@ -1,5 +1,6 @@
 import { IMAGE_URLS, MAX_PARTICLES, WORKGROUP_SIZE, TEXTURE_SIZE } from './config';
 import { computeWGSL, renderWGSL } from './shaders';
+import { TextureLoader } from './textureLoader';
 
 // 由于增加了 aspect_ratio 和 padding，更新数据结构和步长
 // pos(vec2), vel(vec2) -> 16 bytes
@@ -7,11 +8,6 @@ import { computeWGSL, renderWGSL } from './shaders';
 // extra(vec4) -> 16 bytes
 // Total: 48 bytes
 const PARTICLE_STRIDE = 48;
-
-interface LoadedImage {
-    textureIndex: number
-    bitmap: ImageBitmap
-}
 
 export class WebGPURenderer {
     private canvas: HTMLCanvasElement;
@@ -34,8 +30,7 @@ export class WebGPURenderer {
     private renderBindGroup!: GPUBindGroup;
 
     private particleCount = 0;
-    private loadedImages = new Map<string, LoadedImage>();
-    private nextTextureIndex = 0;
+    private textureLoader!: TextureLoader;
     private frame = 0;
     private lastTime = 0;
 
@@ -98,6 +93,14 @@ export class WebGPURenderer {
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
         });
         this.sampler = this.device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+
+        // 初始化纹理加载器
+        this.textureLoader = new TextureLoader(
+            this.device,
+            this.textureArray,
+            TEXTURE_SIZE,
+            IMAGE_URLS.length
+        );
     }
 
     private createPipelines() {
@@ -181,65 +184,46 @@ export class WebGPURenderer {
     private async addParticle() {
         if (this.particleCount >= MAX_PARTICLES) return;
 
-        const imageIndex = Math.floor(Math.random() * IMAGE_URLS.length);
-        const url = IMAGE_URLS[imageIndex];
-        let image: LoadedImage;
+        let cnt = Math.round(Math.random() * 3 + 2.5);
+        while (cnt-- > 0) {
+            const imageIndex = Math.floor(Math.random() * IMAGE_URLS.length);
+            const url = IMAGE_URLS[imageIndex];
 
-        if (this.loadedImages.has(url)) {
-            image = this.loadedImages.get(url)!;
-        } else {
-            if (this.nextTextureIndex >= IMAGE_URLS.length) {
-                console.warn("Texture array is full.");
-                return;
-            }
             try {
-                const response = await fetch(url, { mode: 'cors' });
-                const blob = await response.blob();
-                const imageBitmap = await createImageBitmap(blob);
+                // 使用 TextureLoader 加载纹理，自动处理缓存和去重
+                const texture = await this.textureLoader.loadTexture(url);
 
-                const index = this.nextTextureIndex;
-                this.device.queue.copyExternalImageToTexture(
-                    { source: imageBitmap },
-                    { texture: this.textureArray, origin: [0, 0, index] },
-                    [imageBitmap.width, imageBitmap.height]
+                const particleData = new Float32Array(PARTICLE_STRIDE / 4);
+
+                const velSpeed = (Math.random() + 1) * 0.5;
+                const velAngle = Math.random() * 2 * Math.PI;
+                const velX = Math.cos(velAngle) * velSpeed;
+                const velY = Math.sin(velAngle) * velSpeed;
+
+                particleData[0] = 0.0; // pos.x
+                particleData[1] = 0.0; // pos.y
+                particleData[2] = velX; // vel.x
+                particleData[3] = velY; // vel.y
+                particleData[4] = 0.3; // Math.random() * 0.5 + 0.5; // scale
+                particleData[5] = 0.0; // rotation
+                particleData[6] = (Math.random() - 0.5) * 5.0; // angular velocity
+                particleData[7] = texture.textureIndex; // texture index
+                particleData[8] = texture.bitmap.width / texture.bitmap.height; // aspect_ratio
+                particleData[9] = texture.bitmap.width / TEXTURE_SIZE;      // uv_scale.x
+                particleData[10] = texture.bitmap.height / TEXTURE_SIZE;     // uv_scale.y
+
+                this.device.queue.writeBuffer(
+                    this.particleBuffers[this.frame % 2],
+                    this.particleCount * PARTICLE_STRIDE,
+                    particleData.buffer
                 );
 
-                this.loadedImages.set(url, { bitmap: imageBitmap, textureIndex: index });
-                this.nextTextureIndex++;
-                image = this.loadedImages.get(url)!;
-            } catch (e) {
-                console.error(`Failed to load image: ${url}`, e);
-                return;
+                this.particleCount++;
+                this.button.textContent = `添加一张图片 (${this.particleCount})`;
+            } catch (error) {
+                console.error('Failed to add particle:', error);
             }
         }
-
-        const particleData = new Float32Array(PARTICLE_STRIDE / 4);
-
-        const velSpeed = (Math.random() + 1) * 0.5;
-        const velAngle = Math.random() * 2 * Math.PI;
-        const velX = Math.cos(velAngle) * velSpeed;
-        const velY = Math.sin(velAngle) * velSpeed;
-
-        particleData[0] = 0.0; // pos.x
-        particleData[1] = 0.0; // pos.y
-        particleData[2] = velX; // vel.x
-        particleData[3] = velY; // vel.y
-        particleData[4] = 0.3; // Math.random() * 0.5 + 0.5; // scale
-        particleData[5] = 0.0; // rotation
-        particleData[6] = (Math.random() - 0.5) * 5.0; // angular velocity
-        particleData[7] = image.textureIndex; // texture index
-        particleData[8] = image.bitmap.width / image.bitmap.height; // aspect_ratio
-        particleData[9] = image.bitmap.width / TEXTURE_SIZE;      // uv_scale.x
-        particleData[10] = image.bitmap.height / TEXTURE_SIZE;     // uv_scale.y
-
-        this.device.queue.writeBuffer(
-            this.particleBuffers[this.frame % 2],
-            this.particleCount * PARTICLE_STRIDE,
-            particleData.buffer
-        );
-
-        this.particleCount++;
-        this.button.textContent = `添加一张图片 (${this.particleCount})`;
     }
 
     private renderLoop = () => {
