@@ -74,6 +74,8 @@ function setupButtonEvents(button: HTMLButtonElement, renderer: WebGPURenderer, 
 }
 
 async function bootstrap() {
+  console.log('Project github: https://github.com/dogdie233/anju-gujiguji');
+
   const canvas = document.getElementById('gpu-canvas') as HTMLCanvasElement;
   const button = document.getElementById('add-button') as HTMLButtonElement;
   const fallbackDiv = document.getElementById('fallback') as HTMLDivElement;
