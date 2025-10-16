@@ -286,10 +286,10 @@ export class WebGPURenderer {
   }
 
   public async addParticle() {
-    if (this.particleCount >= MAX_PARTICLES) return;
-
     let cnt = Math.round(Math.random() * 3 + 2.5);
     while (cnt-- > 0) {
+      if (this.particleCount >= MAX_PARTICLES) return;
+
       const imageIndex = Math.floor(Math.random() * IMAGE_URLS.length);
       const url = IMAGE_URLS[imageIndex];
 
