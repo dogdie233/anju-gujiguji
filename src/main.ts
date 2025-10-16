@@ -1,8 +1,11 @@
 import './style.css';
 import { WebGPURenderer } from './renderer';
+import { VoiceLoader } from './voiceLoader';
+import { VoicePlayer } from './voicePlayer';
+import { VOICE_PATH_TEMPLATE, VOICE_TOTAL_COUNT, VOICE_INITIAL_LOAD } from './config';
 
-// Setup button events with hold-to-spawn functionality
-function setupButtonEvents(button: HTMLButtonElement, renderer: WebGPURenderer) {
+// Setup button events with hold-to-spawn functionality and voice
+function setupButtonEvents(button: HTMLButtonElement, renderer: WebGPURenderer, voicePlayer: VoicePlayer) {
   let holdTimer: number | null = null;
   let isHolding = false;
   let spawnInterval: number | null = null;
@@ -15,6 +18,8 @@ function setupButtonEvents(button: HTMLButtonElement, renderer: WebGPURenderer) 
       isHolding = true;
       // Immediately spawn first batch when hold is detected
       renderer.addParticle();
+      // Start continuous voice shots
+      voicePlayer.startContinuousShot();
       // Then spawn continuously
       spawnInterval = window.setInterval(() => {
         renderer.addParticle();
@@ -32,6 +37,8 @@ function setupButtonEvents(button: HTMLButtonElement, renderer: WebGPURenderer) 
       clearInterval(spawnInterval);
       spawnInterval = null;
     }
+    // Stop continuous voice shots
+    voicePlayer.stopContinuousShot();
     isHolding = false;
   };
 
@@ -39,6 +46,8 @@ function setupButtonEvents(button: HTMLButtonElement, renderer: WebGPURenderer) 
     // Only trigger click if not holding (click event fires after mouseup)
     if (!isHolding) {
       renderer.addParticle();
+      // Shot voice once on click
+      voicePlayer.shotVoice();
     }
   };
 
@@ -58,6 +67,7 @@ function setupButtonEvents(button: HTMLButtonElement, renderer: WebGPURenderer) 
     // Manually trigger spawn for touch if not holding
     if (!isHolding) {
       renderer.addParticle();
+      voicePlayer.shotVoice();
     }
   });
   button.addEventListener('touchcancel', endHold);
@@ -74,12 +84,18 @@ async function bootstrap() {
   if (supported) {
     renderer.start();
 
-    // Setup button events
-    setupButtonEvents(button, renderer);
+    // Initialize audio context and voice system
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const voiceLoader = new VoiceLoader(VOICE_PATH_TEMPLATE, VOICE_TOTAL_COUNT, VOICE_INITIAL_LOAD, audioContext);
+    const voicePlayer = new VoicePlayer(voiceLoader, audioContext);
 
-    // Expose FPS toggle to console
+    // Setup button events with voice support
+    setupButtonEvents(button, renderer, voicePlayer);
+
+    // Expose utilities to console
     (window as any).toggleFPS = (show?: boolean) => renderer.toggleFPS(show);
-    console.log('💡 Tip: Use toggleFPS() in console to show/hide FPS overlay');
+    console.log('💡 Tips:');
+    console.log('  - toggleFPS() to show/hide FPS overlay');
   } else {
     button.style.display = 'none';
     fallbackDiv.style.display = 'block';

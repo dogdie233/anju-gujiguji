@@ -339,10 +339,12 @@ export class WebGPURenderer {
     const deltaTime = this.lastTime > 0 ? Math.min(0.1, (now - this.lastTime) / 1000.0) : 0.016;
     this.lastTime = now;
 
-    // Update FPS
+    // Update FPS - use a sliding window approach for more accurate FPS
     this.fpsFrames++;
-    if (now - this.fpsLastTime >= 1000) {
-      this.currentFPS = Math.round((this.fpsFrames * 1000) / (now - this.fpsLastTime));
+    const fpsElapsed = now - this.fpsLastTime;
+    if (fpsElapsed >= 500) {
+      // Update FPS every 500ms for smoother updates
+      this.currentFPS = Math.round((this.fpsFrames * 1000) / fpsElapsed);
       if (this.fpsOverlay && this.fpsOverlay.style.display !== 'none') {
         this.fpsOverlay.textContent = `FPS: ${this.currentFPS}`;
       }
