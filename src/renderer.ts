@@ -95,6 +95,10 @@ export class WebGPURenderer {
     }
 
     this.createFPSOverlay();
+
+    // Preload all textures
+    IMAGE_URLS.forEach((url) => this.textureLoader.loadTexture(url));
+
     return true;
   }
 
