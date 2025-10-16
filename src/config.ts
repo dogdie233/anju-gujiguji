@@ -9,6 +9,7 @@ export const IMAGE_URLS = [
   '/assets/images/normal-背景_アイコン_iconあんじゅ.png',
   '/assets/images/normal-背景_ステッカー_stkあんじゅ.png',
   '/assets/images/normal-背景_肩書_肩書あんじゅset_肩書あんじゅ.png',
+  '/assets/images/ciallo.png',
 ];
 
 export const MAX_PARTICLES = 10000;
