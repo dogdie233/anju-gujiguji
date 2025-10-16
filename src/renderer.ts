@@ -313,7 +313,7 @@ export class WebGPURenderer {
 
         // 静态数据：scale, aspectRatio, angularVel, texIndex, uvScale, padding
         const staticData = new Float32Array(STATIC_PARTICLE_STRIDE / 4);
-        staticData[0] = 0.3; // scale
+        staticData[0] = Math.random() * 0.1 + 0.25; // scale
         staticData[1] = texture.bitmap.width / texture.bitmap.height; // aspectRatio
         staticData[2] = (Math.random() - 0.5) * 5.0; // angularVel
         const u32View = new Uint32Array(staticData.buffer);
