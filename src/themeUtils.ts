@@ -10,7 +10,7 @@ function parseCssColorRaw(cssValue: string | null): [number, number, number, num
     // rgb/rgba
     const rgbMatch = cssValue.match(/rgba?\s*\(([^)]+)\)/i);
     if (rgbMatch) {
-      const parts = rgbMatch[1].split(',').map(p => p.trim());
+      const parts = rgbMatch[1].split(',').map((p) => p.trim());
       const r = parseFloat(parts[0]) / 255;
       const g = parseFloat(parts[1]) / 255;
       const b = parseFloat(parts[2]) / 255;
@@ -69,11 +69,11 @@ export function getClearColorFromCSS(): [number, number, number, number] {
     const fallbackDark: [number, number, number, number] = [0.05, 0.05, 0.05, 1.0];
     const fallbackLight: [number, number, number, number] = [1.0, 1.0, 1.0, 1.0];
 
-  // First try resolving complex CSS expressions (var(), hsl(), keywords)
-  const resolved = resolveCssColor(surface);
-  const parsed = resolved || parseCssColorRaw(surface) || (isDark ? fallbackDark : fallbackLight);
+    // First try resolving complex CSS expressions (var(), hsl(), keywords)
+    const resolved = resolveCssColor(surface);
+    const parsed = resolved || parseCssColorRaw(surface) || (isDark ? fallbackDark : fallbackLight);
 
-  return parsed;
+    return parsed;
   } catch (e) {
     return [0.05, 0.05, 0.05, 1.0];
   }

@@ -1,6 +1,6 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
+  <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>世界需要更多的珠珠</title>
@@ -43,22 +43,28 @@
         min-height: 40px;
         text-transform: none;
         letter-spacing: 0.1px;
-        
+
         background-color: var(--md-sys-color-primary);
         color: var(--md-sys-color-on-primary);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
-        
+        box-shadow:
+          0 1px 2px rgba(0, 0, 0, 0.3),
+          0 1px 3px 1px rgba(0, 0, 0, 0.15);
+
         transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       }
 
       button:hover {
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 8px 3px rgba(0, 0, 0, 0.15);
+        box-shadow:
+          0 1px 3px rgba(0, 0, 0, 0.4),
+          0 4px 8px 3px rgba(0, 0, 0, 0.15);
         background-color: var(--md-sys-color-primary-container);
         color: var(--md-sys-color-on-primary-container);
       }
 
       button:active {
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
+        box-shadow:
+          0 1px 2px rgba(0, 0, 0, 0.3),
+          0 1px 3px 1px rgba(0, 0, 0, 0.15);
       }
 
       button:focus-visible {
@@ -82,13 +88,13 @@
         font-size: 1.5em;
       }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <canvas id="gpu-canvas"></canvas>
     <div id="ui-container">
-        <button id="add-button">我们需要更多珠珠</button>
-        <div id="fallback"></div>
+      <button id="add-button">我们需要更多珠珠</button>
+      <div id="fallback"></div>
     </div>
     <script type="module" src="/src/main.ts"></script>
-</body>
+  </body>
 </html>
